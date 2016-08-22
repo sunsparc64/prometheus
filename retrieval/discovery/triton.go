@@ -138,8 +138,7 @@ func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 		}
 
 		// TODO: Get the correct URL for this.
-		addr := fmt.Sprintf("%s://monitoring.%s/%s", u.Scheme, u.Host, machine.Id)
-		labels[model.AddressLabel] = model.LabelValue(addr)
+		labels[model.AddressLabel] = model.LabelValue(u.Host)
 
 		// TODO: CNS name for container?
 
