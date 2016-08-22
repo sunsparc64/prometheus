@@ -144,6 +144,12 @@ var (
 		Port:            80,
 		RefreshInterval: model.Duration(5 * time.Minute),
 	}
+
+	// DefaultTritonSDConfig is the default Triton SD configuration.
+	DefaultTritonSDConfig = TritonSDConfig{
+		KeyAlgorithm: "rsa-sha256",
+		RefreshInterval: model.Duration(60 * time.Second),
+	}
 )
 
 // URL is a custom URL type that allows validation at configuration load time.
@@ -433,6 +439,8 @@ type ScrapeConfig struct {
 	EC2SDConfigs []*EC2SDConfig `yaml:"ec2_sd_configs,omitempty"`
 	// List of Azure service discovery configurations.
 	AzureSDConfigs []*AzureSDConfig `yaml:"azure_sd_configs,omitempty"`
+	// List of Triton service discovery configurations.
+	TritonSDConfigs []*TritonSDConfig `yaml:"triton_sd_configs,omitempty"`
 
 	// List of target relabel configurations.
 	RelabelConfigs []*RelabelConfig `yaml:"relabel_configs,omitempty"`
@@ -896,6 +904,41 @@ func (c *AzureSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	return checkOverflow(c.XXX, "azure_sd_config")
+}
+
+// TritonSDConfig is the configuration for Triton based service discovery.
+type TritonSDConfig struct {
+	Url             string         `yaml:"url"`
+	Account         string         `yaml:"account"`
+	Key             string         `yaml:"key"`
+	KeyId           string         `yaml:"key_id"`
+	KeyAlgorithm    string         `yaml:"key_algorithm,omitempty"`
+	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
+	// Catches all undefined fields and must be empty after parsing.
+	XXX map[string]interface{} `yaml:",inline"`
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (c *TritonSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = DefaultTritonSDConfig
+	type plain TritonSDConfig
+	err := unmarshal((*plain)(c))
+	if err != nil {
+		return err
+	}
+	if c.Url == "" {
+		return fmt.Errorf("Triton SD configuration requires a datacenter Url")
+	}
+	if c.Account == "" {
+		return fmt.Errorf("Triton SD configuration requires an account")
+	}
+	if c.Key == "" {
+		return fmt.Errorf("Triton SD configuration requires a key")
+	}
+	if c.KeyId == "" {
+		return fmt.Errorf("Triton SD configuration requires a key_id")
+	}
+	return checkOverflow(c.XXX, "triton_sd_config")
 }
 
 // RelabelAction is the action to be performed on relabeling.
