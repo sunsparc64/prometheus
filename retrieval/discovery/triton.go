@@ -112,6 +112,8 @@ func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 		panic(err)
 	}
 
+	fmt.Println(u.Host);
+
 	tg := &config.TargetGroup{
 		Source: td.sdConfig.Url,
 	}
@@ -138,7 +140,8 @@ func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 		}
 
 		// TODO: Get the correct URL for this.
-		labels[model.AddressLabel] = model.LabelValue(u.Host)
+		addr := fmt.Sprintf("%s.cm.coal.cns.joyent.us:9163", machine.Id)
+		labels[model.AddressLabel] = model.LabelValue(addr)
 
 		// TODO: CNS name for container?
 
