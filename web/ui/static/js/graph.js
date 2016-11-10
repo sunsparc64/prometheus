@@ -196,9 +196,44 @@ Prometheus.Graph.prototype.populateInsertableMetrics = function() {
           self.insertMetric[0].options.add(new Option(metrics[i], metrics[i]));
         }
 
+        self.fuzzyResult = {
+          query: null,
+          result: null,
+          map: {}
+        }
+
         self.expr.typeahead({
           source: metrics,
-          items: "all"
+          items: "all",
+          matcher: function(item) {
+            // If we have result for current query, skip
+            if (!self.fuzzyResult.query || self.fuzzyResult.query !== this.query) {
+              self.fuzzyResult.query = this.query;
+              self.fuzzyResult.map = {};
+              self.fuzzyResult.result = fuzzy.filter(this.query.replace('_', ' '), metrics, {
+                pre: '<strong>',
+                post: '</strong>',
+                extract: function(el) { return el.replace('_', ' ') }
+              });
+              self.fuzzyResult.result.forEach(function(r) {
+                self.fuzzyResult.map[r.original] = r;
+              });
+            }
+
+            return item in self.fuzzyResult.map;
+          },
+
+          sorter: function(items) {
+            items.sort(function(a,b) {
+              var i = self.fuzzyResult.map[b].score - self.fuzzyResult.map[a].score;
+              return i === 0 ? a.localeCompare(b) : i;
+            });
+            return items;
+          },
+
+          highlighter: function (item) {
+            return $('<div>' + self.fuzzyResult.map[item].string.replace(' ', '_') + '</div>')
+          },
         });
         // This needs to happen after attaching the typeahead plugin, as it
         // otherwise breaks the typeahead functionality.
@@ -364,7 +399,10 @@ Prometheus.Graph.prototype.submitQuery = function() {
           self.showError("Error executing query: " + err);
         }
       },
-      complete: function() {
+      complete: function(xhr, resp) {
+        if (resp == "abort") {
+          return;
+        }
         var duration = new Date().getTime() - startTime;
         self.evalStats.html("Load time: " + duration + "ms <br /> Resolution: " + resolution + "s");
         self.spinner.hide();
@@ -741,9 +779,8 @@ Prometheus.Page.QueryParamHelper.prototype.parseQueryParamsOfOneGraph = function
   queryParams.forEach(function(tuple) {
     var optionNameAndValue = tuple.split('=');
     var optionName = optionNameAndValue[0];
-    var optionValue = decodeURIComponent(optionNameAndValue[1]);
 
-    optionValue = optionValue.replace(/\+/g, " "); // $.param turns spaces into pluses
+    var optionValue = decodeURIComponent(optionNameAndValue[1].replace(/\+/g, " "));
 
     if (optionName == "tab") {
       optionValue = parseInt(optionValue); // tab is integer
@@ -777,10 +814,47 @@ function init() {
     url: PATH_PREFIX + "/static/js/graph_template.handlebar",
     success: function(data) {
       graphTemplate = Handlebars.compile(data);
-      var Page = new Prometheus.Page();
-      Page.init();
+      if (isDeprecatedGraphURL()) {
+        redirectToMigratedURL();
+      } else {
+        var Page = new Prometheus.Page();
+        Page.init();
+      }
     }
   });
+}
+
+
+
+// These two methods (isDeprecatedGraphURL and redirectToMigratedURL)
+// are added only for backward compatibility to old query format.
+function isDeprecatedGraphURL() {
+  if (window.location.hash.length == 0) {
+    return false;
+  }
+
+  var decodedFragment = decodeURIComponent(window.location.hash);
+  try {
+      JSON.parse(decodedFragment.substr(1)); // drop the hash #
+  } catch (e) {
+      return false;
+  }
+  return true;
+}
+
+function redirectToMigratedURL() {
+  var decodedFragment = decodeURIComponent(window.location.hash);
+  var graphOptions = JSON.parse(decodedFragment.substr(1)); // drop the hash #
+  var queryObject = {};
+
+  graphOptions.map(function(options, index){
+    var prefix = "g" + index + ".";
+    Object.keys(options).forEach(function(key) {
+      queryObject[prefix + key] = options[key];
+    });
+  });
+  var query = $.param(queryObject);
+  window.location = "/graph?" + query;
 }
 
 $(init);

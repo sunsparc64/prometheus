@@ -14,8 +14,7 @@
 package discovery
 
 import (
-	"time"
-
+	"github.com/prometheus/common/log"
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/retrieval/discovery/consul"
 	"github.com/prometheus/prometheus/retrieval/discovery/dns"
@@ -29,24 +28,13 @@ func NewConsul(cfg *config.ConsulSDConfig) (*consul.Discovery, error) {
 }
 
 // NewKubernetesDiscovery creates a Kubernetes service discovery based on the passed-in configuration.
-func NewKubernetesDiscovery(conf *config.KubernetesSDConfig) (*kubernetes.Discovery, error) {
-	kd := &kubernetes.Discovery{
-		Conf: conf,
-	}
-	err := kd.Initialize()
-	if err != nil {
-		return nil, err
-	}
-	return kd, nil
+func NewKubernetesDiscovery(conf *config.KubernetesSDConfig) (*kubernetes.Kubernetes, error) {
+	return kubernetes.New(log.Base(), conf)
 }
 
 // NewMarathon creates a new Marathon based discovery.
-func NewMarathon(conf *config.MarathonSDConfig) *marathon.Discovery {
-	return &marathon.Discovery{
-		Servers:         conf.Servers,
-		RefreshInterval: time.Duration(conf.RefreshInterval),
-		Client:          marathon.FetchApps,
-	}
+func NewMarathon(conf *config.MarathonSDConfig) (*marathon.Discovery, error) {
+	return marathon.NewDiscovery(conf)
 }
 
 // NewDNS creates a new DNS based discovery.

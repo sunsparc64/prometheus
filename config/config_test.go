@@ -44,6 +44,19 @@ var expectedConf = &Config{
 		"testdata/my/*.rules",
 	},
 
+	RemoteWriteConfig: RemoteWriteConfig{
+		RemoteTimeout: model.Duration(30 * time.Second),
+		WriteRelabelConfigs: []*RelabelConfig{
+			{
+				SourceLabels: model.LabelNames{"__name__"},
+				Separator:    ";",
+				Regex:        MustNewRegexp("expensive.*"),
+				Replacement:  "$1",
+				Action:       RelabelDrop,
+			},
+		},
+	},
+
 	ScrapeConfigs: []*ScrapeConfig{
 		{
 			JobName: "prometheus",
@@ -100,6 +113,12 @@ var expectedConf = &Config{
 					TargetLabel: "abc",
 					Separator:   ";",
 					Regex:       DefaultRelabelConfig.Regex,
+					Replacement: "static",
+					Action:      RelabelReplace,
+				}, {
+					TargetLabel: "abc",
+					Separator:   ";",
+					Regex:       MustNewRegexp(""),
 					Replacement: "static",
 					Action:      RelabelReplace,
 				},
@@ -194,6 +213,17 @@ var expectedConf = &Config{
 					Scheme:       DefaultConsulSDConfig.Scheme,
 				},
 			},
+
+			RelabelConfigs: []*RelabelConfig{
+				{
+					SourceLabels: model.LabelNames{"__meta_sd_consul_tags"},
+					Regex:        MustNewRegexp("label:([^=]+)=([^,]+)"),
+					Separator:    ",",
+					TargetLabel:  "${1}",
+					Replacement:  "${2}",
+					Action:       RelabelReplace,
+				},
+			},
 		},
 		{
 			JobName: "service-z",
@@ -222,14 +252,12 @@ var expectedConf = &Config{
 
 			KubernetesSDConfigs: []*KubernetesSDConfig{
 				{
-					APIServers: []URL{kubernetesSDHostURL()},
-					Role:       KubernetesRoleEndpoint,
+					APIServer: kubernetesSDHostURL(),
+					Role:      KubernetesRoleEndpoint,
 					BasicAuth: &BasicAuth{
 						Username: "myusername",
 						Password: "mypassword",
 					},
-					RequestTimeout: model.Duration(10 * time.Second),
-					RetryInterval:  model.Duration(1 * time.Second),
 				},
 			},
 		},
@@ -245,9 +273,14 @@ var expectedConf = &Config{
 			MarathonSDConfigs: []*MarathonSDConfig{
 				{
 					Servers: []string{
-						"http://marathon.example.com:8080",
+						"https://marathon.example.com:443",
 					},
+					Timeout:         model.Duration(30 * time.Second),
 					RefreshInterval: model.Duration(30 * time.Second),
+					TLSConfig: TLSConfig{
+						CertFile: "testdata/valid_cert_file",
+						KeyFile:  "testdata/valid_key_file",
+					},
 				},
 			},
 		},
@@ -307,6 +340,40 @@ var expectedConf = &Config{
 				},
 			},
 		},
+		{
+			JobName: "0123service-xxx",
+
+			ScrapeInterval: model.Duration(15 * time.Second),
+			ScrapeTimeout:  DefaultGlobalConfig.ScrapeTimeout,
+
+			MetricsPath: DefaultScrapeConfig.MetricsPath,
+			Scheme:      DefaultScrapeConfig.Scheme,
+
+			StaticConfigs: []*TargetGroup{
+				{
+					Targets: []model.LabelSet{
+						{model.AddressLabel: "localhost:9090"},
+					},
+				},
+			},
+		},
+		{
+			JobName: "測試",
+
+			ScrapeInterval: model.Duration(15 * time.Second),
+			ScrapeTimeout:  DefaultGlobalConfig.ScrapeTimeout,
+
+			MetricsPath: DefaultScrapeConfig.MetricsPath,
+			Scheme:      DefaultScrapeConfig.Scheme,
+
+			StaticConfigs: []*TargetGroup{
+				{
+					Targets: []model.LabelSet{
+						{model.AddressLabel: "localhost:9090"},
+					},
+				},
+			},
+		},
 	},
 	original: "",
 }
@@ -315,7 +382,7 @@ func TestLoadConfig(t *testing.T) {
 	// Parse a valid file that sets a global scrape timeout. This tests whether parsing
 	// an overwritten default field in the global config permanently changes the default.
 	if _, err := LoadFile("testdata/global_timeout.good.yml"); err != nil {
-		t.Errorf("Error parsing %s: %s", "testdata/conf.good.yml", err)
+		t.Errorf("Error parsing %s: %s", "testdata/global_timeout.good.yml", err)
 	}
 
 	c, err := LoadFile("testdata/conf.good.yml")
@@ -351,7 +418,7 @@ var expectedErrors = []struct {
 }{
 	{
 		filename: "jobname.bad.yml",
-		errMsg:   `"prom^etheus" is not a valid job name`,
+		errMsg:   `job_name is empty`,
 	}, {
 		filename: "jobname_dup.bad.yml",
 		errMsg:   `found multiple scrape configs with job name "prometheus"`,
@@ -397,6 +464,12 @@ var expectedErrors = []struct {
 	}, {
 		filename: "url_in_targetgroup.bad.yml",
 		errMsg:   "\"http://bad\" is not a valid hostname",
+	}, {
+		filename: "target_label_missing.bad.yml",
+		errMsg:   "relabel configuration for replace action requires 'target_label' value",
+	}, {
+		filename: "target_label_hashmod_missing.bad.yml",
+		errMsg:   "relabel configuration for hashmod action requires 'target_label' value",
 	},
 }
 
@@ -447,6 +520,34 @@ func TestEmptyGlobalBlock(t *testing.T) {
 
 	if !reflect.DeepEqual(*c, exp) {
 		t.Fatalf("want %v, got %v", exp, c)
+	}
+}
+
+func TestTargetLabelValidity(t *testing.T) {
+	tests := []struct {
+		str   string
+		valid bool
+	}{
+		{"-label", false},
+		{"label", true},
+		{"label${1}", true},
+		{"${1}label", true},
+		{"${1}", true},
+		{"${1}label", true},
+		{"${", false},
+		{"$", false},
+		{"${}", false},
+		{"foo${", false},
+		{"$1", true},
+		{"asd$2asd", true},
+		{"-foo${1}bar-", false},
+		{"_${1}_", true},
+		{"foo${bar}foo", true},
+	}
+	for _, test := range tests {
+		if relabelTarget.Match([]byte(test.str)) != test.valid {
+			t.Fatalf("Expected %q to be %v", test.str, test.valid)
+		}
 	}
 }
 

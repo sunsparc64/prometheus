@@ -1,3 +1,124 @@
+## 1.3.1 / 2016-11-04
+
+This bug-fix release pulls in the fixes from the 1.2.3 release.
+
+* [BUGFIX] Correctly handle empty Regex entry in relabel config.
+* [BUGFIX] MOD (`%`) operator doesn't panic with small floating point numbers.
+* [BUGFIX] Updated miekg/dns vendoring to pick up upstream bug fixes.
+* [ENHANCEMENT] Improved DNS error reporting.
+
+## 1.2.3 / 2016-11-04
+
+Note that this release is chronologically after 1.3.0.
+
+* [BUGFIX] Correctly handle end time before start time in range queries.
+* [BUGFIX] Error on negative `-storage.staleness-delta`
+* [BUGFIX] Correctly handle empty Regex entry in relabel config.
+* [BUGFIX] MOD (`%`) operator doesn't panic with small floating point numbers.
+* [BUGFIX] Updated miekg/dns vendoring to pick up upstream bug fixes.
+* [ENHANCEMENT] Improved DNS error reporting.
+
+## 1.3.0 / 2016-11-01
+
+This is a breaking change to the Kubernetes service discovery.
+
+* [CHANGE] Rework Kubernetes SD.
+* [FEATURE] Add support for interpolating `target_label`.
+* [FEATURE] Add GCE metadata as Prometheus meta labels.
+* [ENHANCEMENT] Add EC2 SD metrics.
+* [ENHANCEMENT] Add Azure SD metrics.
+* [ENHANCEMENT] Add fuzzy search to `/graph` textarea.
+* [ENHANCEMENT] Always show instance labels on target page.
+* [BUGFIX] Validate query end time is not before start time.
+* [BUGFIX] Error on negative `-storage.staleness-delta`
+
+## 1.2.2 / 2016-10-30
+
+* [BUGFIX] Correctly handle on() in alerts.
+* [BUGFIX] UI: Deal properly with aborted requests.
+* [BUGFIX] UI: Decode URL query parameters properly.
+* [BUGFIX] Storage: Deal better with data corruption (non-monotonic timestamps).
+* [BUGFIX] Remote storage: Re-add accidentally removed timeout flag.
+* [BUGFIX] Updated a number of vendored packages to pick up upstream bug fixes.
+
+## 1.2.1 / 2016-10-10
+
+* [BUGFIX] Count chunk evictions properly so that the server doesn't
+  assume it runs out of memory and subsequencly throttles ingestion.
+* [BUGFIX] Use Go1.7.1 for prebuilt binaries to fix issues on MacOS Sierra.
+
+## 1.2.0 / 2016-10-07
+
+* [FEATURE] Cleaner encoding of query parameters in `/graph` URLs.
+* [FEATURE] PromQL: Add `minute()` function.
+* [FEATURE] Add GCE service discovery.
+* [FEATURE] Allow any valid UTF-8 string as job name.
+* [FEATURE] Allow disabling local storage.
+* [FEATURE] EC2 service discovery: Expose `ec2_instance_state`.
+* [ENHANCEMENT] Various performance improvements in local storage.
+* [BUGFIX] Zookeeper service discovery: Remove deleted nodes.
+* [BUGFIX] Zookeeper service discovery: Resync state after Zookeeper failure.
+* [BUGFIX] Remove JSON from HTTP Accept header.
+* [BUGFIX] Fix flag validation of Alertmanager URL.
+* [BUGFIX] Fix race condition on shutdown.
+* [BUGFIX] Do not fail Consul discovery on Prometheus startup when Consul
+  is down.
+* [BUGFIX] Handle NaN in `changes()` correctly.
+* [CHANGE] **Experimental** remote write path: Remove use of gRPC.
+* [CHANGE] **Experimental** remote write path: Configuration via config file
+  rather than command line flags.
+* [FEATURE] **Experimental** remote write path: Add HTTP basic auth and TLS.
+* [FEATURE] **Experimental** remote write path: Support for relabelling.
+
+## 1.1.3 / 2016-09-16
+
+* [ENHANCEMENT] Use golang-builder base image for tests in CircleCI.
+* [ENHANCEMENT] Added unit tests for federation.
+* [BUGFIX] Correctly de-dup metric families in federation output.
+
+## 1.1.2 / 2016-09-08
+
+* [BUGFIX] Allow label names that coincide with keywords.
+
+## 1.1.1 / 2016-09-07
+
+* [BUGFIX] Fix IPv6 escaping in service discovery integrations
+* [BUGFIX] Fix default scrape port assignment for IPv6
+
+## 1.1.0 / 2016-09-03
+
+* [FEATURE] Add `quantile` and `quantile_over_time`.
+* [FEATURE] Add `stddev_over_time` and `stdvar_over_time`.
+* [FEATURE] Add various time and date functions.
+* [FEATURE] Added `toUpper` and `toLower` formatting to templates.
+* [FEATURE] Allow relabeling of alerts.
+* [FEATURE] Allow URLs in targets defined via a JSON file.
+* [FEATURE] Add idelta function.
+* [FEATURE] 'Remove graph' button on the /graph page.
+* [FEATURE] Kubernetes SD: Add node name and host IP to pod discovery.
+* [FEATURE] New remote storage write path. EXPERIMENTAL!
+* [ENHANCEMENT] Improve time-series index lookups.
+* [ENHANCEMENT] Forbid invalid relabel configurations.
+* [ENHANCEMENT] Improved various tests.
+* [ENHANCEMENT] Add crash recovery metric 'started_dirty'.
+* [ENHANCEMENT] Fix (and simplify) populating series iterators.
+* [ENHANCEMENT] Add job link on target page.
+* [ENHANCEMENT] Message on empty Alerts page.
+* [ENHANCEMENT] Various internal code refactorings and clean-ups.
+* [ENHANCEMENT] Various improvements in the build system.
+* [BUGFIX] Catch errors when unmarshalling delta/doubleDelta encoded chunks.
+* [BUGFIX] Fix data race in lexer and lexer test.
+* [BUGFIX] Trim stray whitespace from bearer token file.
+* [BUGFIX] Avoid divide-by-zero panic on query_range?step=0.
+* [BUGFIX] Detect invalid rule files at startup.
+* [BUGFIX] Fix counter reset treatment in PromQL.
+* [BUGFIX] Fix rule HTML escaping issues.
+* [BUGFIX] Remove internal labels from alerts sent to AM.
+
+## 1.0.2 / 2016-08-24
+
+* [BUGFIX] Clean up old targets after config reload.
+
 ## 1.0.1 / 2016-07-21
 
 * [BUGFIX] Exit with error on non-flag command-line arguments.

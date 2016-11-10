@@ -42,13 +42,13 @@ var (
 	dnsSDLookupsCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
-			Name:      "dns_sd_lookups_total",
+			Name:      "sd_dns_lookups_total",
 			Help:      "The number of DNS-SD lookups.",
 		})
 	dnsSDLookupFailuresCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
-			Name:      "dns_sd_lookup_failures_total",
+			Name:      "sd_dns_lookup_failures_total",
 			Help:      "The number of DNS-SD lookup failures.",
 		})
 )
@@ -133,6 +133,9 @@ func (dd *Discovery) refresh(ctx context.Context, name string, ch chan<- []*conf
 	}
 
 	tg := &config.TargetGroup{}
+	hostPort := func(a string, p int) model.LabelValue {
+		return model.LabelValue(net.JoinHostPort(a, fmt.Sprintf("%d", p)))
+	}
 
 	for _, record := range response.Answer {
 		target := model.LabelValue("")
@@ -141,11 +144,11 @@ func (dd *Discovery) refresh(ctx context.Context, name string, ch chan<- []*conf
 			// Remove the final dot from rooted DNS names to make them look more usual.
 			addr.Target = strings.TrimRight(addr.Target, ".")
 
-			target = model.LabelValue(fmt.Sprintf("%s:%d", addr.Target, addr.Port))
+			target = hostPort(addr.Target, int(addr.Port))
 		case *dns.A:
-			target = model.LabelValue(fmt.Sprintf("%s:%d", addr.A, dd.port))
+			target = hostPort(addr.A.String(), dd.port)
 		case *dns.AAAA:
-			target = model.LabelValue(fmt.Sprintf("%s:%d", addr.AAAA, dd.port))
+			target = hostPort(addr.AAAA.String(), dd.port)
 		default:
 			log.Warnf("%q is not a valid SRV record", record)
 			continue
@@ -181,7 +184,12 @@ func lookupAll(name string, qtype uint16) (*dns.Msg, error) {
 		for _, suffix := range conf.Search {
 			response, err = lookup(name, qtype, client, servAddr, suffix, false)
 			if err != nil {
-				log.Warnf("resolving %s.%s failed: %s", name, suffix, err)
+				log.
+					With("server", server).
+					With("name", name).
+					With("suffix", suffix).
+					With("reason", err).
+					Warn("DNS resolution failed.")
 				continue
 			}
 			if len(response.Answer) > 0 {
@@ -192,8 +200,13 @@ func lookupAll(name string, qtype uint16) (*dns.Msg, error) {
 		if err == nil {
 			return response, nil
 		}
+		log.
+			With("server", server).
+			With("name", name).
+			With("reason", err).
+			Warn("DNS resolution failed.")
 	}
-	return response, fmt.Errorf("could not resolve %s: No server responded", name)
+	return response, fmt.Errorf("could not resolve %s: no server responded", name)
 }
 
 func lookup(name string, queryType uint16, client *dns.Client, servAddr string, suffix string, edns bool) (*dns.Msg, error) {
@@ -202,33 +215,24 @@ func lookup(name string, queryType uint16, client *dns.Client, servAddr string, 
 	msg.SetQuestion(dns.Fqdn(lname), queryType)
 
 	if edns {
-		opt := &dns.OPT{
-			Hdr: dns.RR_Header{
-				Name:   ".",
-				Rrtype: dns.TypeOPT,
-			},
-		}
-		opt.SetUDPSize(dns.DefaultMsgSize)
-		msg.Extra = append(msg.Extra, opt)
+		msg.SetEdns0(dns.DefaultMsgSize, false)
 	}
 
 	response, _, err := client.Exchange(msg, servAddr)
-	if err != nil {
-		return nil, err
-	}
-	if msg.Id != response.Id {
-		return nil, fmt.Errorf("DNS ID mismatch, request: %d, response: %d", msg.Id, response.Id)
-	}
-
-	if response.MsgHdr.Truncated {
+	if err == dns.ErrTruncated {
 		if client.Net == "tcp" {
-			return nil, fmt.Errorf("got truncated message on tcp")
+			return nil, fmt.Errorf("got truncated message on TCP (64kiB limit exceeded?)")
 		}
 		if edns { // Truncated even though EDNS is used
 			client.Net = "tcp"
 		}
 		return lookup(name, queryType, client, servAddr, suffix, !edns)
 	}
-
+	if err != nil {
+		return nil, err
+	}
+	if msg.Id != response.Id {
+		return nil, fmt.Errorf("DNS ID mismatch, request: %d, response: %d", msg.Id, response.Id)
+	}
 	return response, nil
 }

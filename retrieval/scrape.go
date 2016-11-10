@@ -35,6 +35,7 @@ import (
 const (
 	scrapeHealthMetricName   = "up"
 	scrapeDurationMetricName = "scrape_duration_seconds"
+	scrapeSamplesMetricName  = "scrape_samples_scraped"
 
 	// Constants for instrumentation.
 	namespace = "prometheus"
@@ -115,7 +116,7 @@ type scrapePool struct {
 }
 
 func newScrapePool(cfg *config.ScrapeConfig, app storage.SampleAppender) *scrapePool {
-	client, err := newHTTPClient(cfg)
+	client, err := NewHTTPClient(cfg)
 	if err != nil {
 		// Any errors that could occur here should be caught during config validation.
 		log.Errorf("Error creating HTTP client for job %q: %s", cfg.JobName, err)
@@ -167,7 +168,7 @@ func (sp *scrapePool) reload(cfg *config.ScrapeConfig) {
 	sp.mtx.Lock()
 	defer sp.mtx.Unlock()
 
-	client, err := newHTTPClient(cfg)
+	client, err := NewHTTPClient(cfg)
 	if err != nil {
 		// Any errors that could occur here should be caught during config validation.
 		log.Errorf("Error creating HTTP client for job %q: %s", cfg.JobName, err)
@@ -308,7 +309,7 @@ type targetScraper struct {
 	client *http.Client
 }
 
-const acceptHeader = `application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited;q=0.7,text/plain;version=0.0.4;q=0.3,application/json;schema="prometheus/telemetry";version=0.0.2;q=0.2,*/*;q=0.1`
+const acceptHeader = `application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited;q=0.7,text/plain;version=0.0.4;q=0.3,*/*;q=0.1`
 
 func (s *targetScraper) scrape(ctx context.Context, ts time.Time) (model.Samples, error) {
 	req, err := http.NewRequest("GET", s.URL().String(), nil)
@@ -424,7 +425,7 @@ func (sl *scrapeLoop) run(interval, timeout time.Duration, errc chan<- error) {
 				errc <- err
 			}
 
-			sl.report(start, time.Since(start), err)
+			sl.report(start, time.Since(start), len(samples), err)
 			last = start
 		} else {
 			targetSkippedScrapes.WithLabelValues(interval.String()).Inc()
@@ -471,7 +472,7 @@ func (sl *scrapeLoop) append(samples model.Samples) {
 	}
 }
 
-func (sl *scrapeLoop) report(start time.Time, duration time.Duration, err error) {
+func (sl *scrapeLoop) report(start time.Time, duration time.Duration, scrapedSamples int, err error) {
 	sl.scraper.report(start, duration, err)
 
 	ts := model.TimeFromUnixNano(start.UnixNano())
@@ -495,11 +496,21 @@ func (sl *scrapeLoop) report(start time.Time, duration time.Duration, err error)
 		Timestamp: ts,
 		Value:     model.SampleValue(duration.Seconds()),
 	}
+	countSample := &model.Sample{
+		Metric: model.Metric{
+			model.MetricNameLabel: scrapeSamplesMetricName,
+		},
+		Timestamp: ts,
+		Value:     model.SampleValue(scrapedSamples),
+	}
 
 	if err := sl.reportAppender.Append(healthSample); err != nil {
 		log.With("sample", healthSample).With("error", err).Warn("Scrape health sample discarded")
 	}
 	if err := sl.reportAppender.Append(durationSample); err != nil {
 		log.With("sample", durationSample).With("error", err).Warn("Scrape duration sample discarded")
+	}
+	if err := sl.reportAppender.Append(countSample); err != nil {
+		log.With("sample", durationSample).With("error", err).Warn("Scrape sample count sample discarded")
 	}
 }

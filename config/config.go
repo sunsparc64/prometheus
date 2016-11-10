@@ -28,10 +28,10 @@ import (
 )
 
 var (
-	patJobName    = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]*$`)
 	patFileSDName = regexp.MustCompile(`^[^*]*(\*[^/]*)?\.(json|yml|yaml|JSON|YML|YAML)$`)
 	patRulePath   = regexp.MustCompile(`^[^*]*(\*[^/]*)?$`)
 	patAuthLine   = regexp.MustCompile(`((?:password|bearer_token|secret_key|client_secret):\s+)(".+"|'.+'|[^\s]+)`)
+	relabelTarget = regexp.MustCompile(`^(?:(?:[a-zA-Z_]|\$(?:\{\w+\}|\w+))+\w*)+$`)
 )
 
 // Load parses the YAML input s into a Config.
@@ -124,13 +124,18 @@ var (
 
 	// DefaultMarathonSDConfig is the default Marathon SD configuration.
 	DefaultMarathonSDConfig = MarathonSDConfig{
+		Timeout:         model.Duration(30 * time.Second),
 		RefreshInterval: model.Duration(30 * time.Second),
 	}
 
 	// DefaultKubernetesSDConfig is the default Kubernetes SD configuration
-	DefaultKubernetesSDConfig = KubernetesSDConfig{
-		RequestTimeout: model.Duration(10 * time.Second),
-		RetryInterval:  model.Duration(1 * time.Second),
+	DefaultKubernetesSDConfig = KubernetesSDConfig{}
+
+	// DefaultGCESDConfig is the default EC2 SD configuration.
+	DefaultGCESDConfig = GCESDConfig{
+		Port:            80,
+		TagSeparator:    ",",
+		RefreshInterval: model.Duration(60 * time.Second),
 	}
 
 	// DefaultEC2SDConfig is the default EC2 SD configuration.
@@ -149,6 +154,11 @@ var (
 	DefaultTritonSDConfig = TritonSDConfig{
 		KeyAlgorithm: "rsa-sha256",
 		RefreshInterval: model.Duration(60 * time.Second),
+	}
+
+	// DefaultRemoteWriteConfig is the default remote write configuration.
+	DefaultRemoteWriteConfig = RemoteWriteConfig{
+		RemoteTimeout: model.Duration(30 * time.Second),
 	}
 )
 
@@ -187,6 +197,8 @@ type Config struct {
 	RuleFiles      []string        `yaml:"rule_files,omitempty"`
 	ScrapeConfigs  []*ScrapeConfig `yaml:"scrape_configs,omitempty"`
 
+	RemoteWriteConfig RemoteWriteConfig `yaml:"remote_write,omitempty"`
+
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline"`
 
@@ -220,6 +232,13 @@ func resolveFilepaths(baseDir string, cfg *Config) {
 			kcfg.TLSConfig.CertFile = join(kcfg.TLSConfig.CertFile)
 			kcfg.TLSConfig.KeyFile = join(kcfg.TLSConfig.KeyFile)
 		}
+
+		for _, mcfg := range scfg.MarathonSDConfigs {
+			mcfg.TLSConfig.CAFile = join(mcfg.TLSConfig.CAFile)
+			mcfg.TLSConfig.CertFile = join(mcfg.TLSConfig.CertFile)
+			mcfg.TLSConfig.KeyFile = join(mcfg.TLSConfig.KeyFile)
+		}
+
 	}
 }
 
@@ -351,7 +370,6 @@ func (c *GlobalConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		gc.EvaluationInterval = DefaultGlobalConfig.EvaluationInterval
 	}
 	*c = *gc
-
 	return nil
 }
 
@@ -435,6 +453,8 @@ type ScrapeConfig struct {
 	MarathonSDConfigs []*MarathonSDConfig `yaml:"marathon_sd_configs,omitempty"`
 	// List of Kubernetes service discovery configurations.
 	KubernetesSDConfigs []*KubernetesSDConfig `yaml:"kubernetes_sd_configs,omitempty"`
+	// List of GCE service discovery configurations.
+	GCESDConfigs []*GCESDConfig `yaml:"gce_sd_configs,omitempty"`
 	// List of EC2 service discovery configurations.
 	EC2SDConfigs []*EC2SDConfig `yaml:"ec2_sd_configs,omitempty"`
 	// List of Azure service discovery configurations.
@@ -462,8 +482,8 @@ func (c *ScrapeConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err := checkOverflow(c.XXX, "scrape_config"); err != nil {
 		return err
 	}
-	if !patJobName.MatchString(c.JobName) {
-		return fmt.Errorf("%q is not a valid job name", c.JobName)
+	if len(c.JobName) == 0 {
+		return fmt.Errorf("job_name is empty")
 	}
 	if len(c.BearerToken) > 0 && len(c.BearerTokenFile) > 0 {
 		return fmt.Errorf("at most one of bearer_token & bearer_token_file must be configured")
@@ -765,7 +785,9 @@ func (c *NerveSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // MarathonSDConfig is the configuration for services running on Marathon.
 type MarathonSDConfig struct {
 	Servers         []string       `yaml:"servers,omitempty"`
+	Timeout         model.Duration `yaml:"timeout,omitempty"`
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
+	TLSConfig       TLSConfig      `yaml:"tls_config,omitempty"`
 
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline"`
@@ -789,31 +811,13 @@ func (c *MarathonSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) erro
 	return nil
 }
 
-// KubernetesSDConfig is the configuration for Kubernetes service discovery.
-type KubernetesSDConfig struct {
-	APIServers      []URL          `yaml:"api_servers"`
-	Role            KubernetesRole `yaml:"role"`
-	InCluster       bool           `yaml:"in_cluster,omitempty"`
-	BasicAuth       *BasicAuth     `yaml:"basic_auth,omitempty"`
-	BearerToken     string         `yaml:"bearer_token,omitempty"`
-	BearerTokenFile string         `yaml:"bearer_token_file,omitempty"`
-	RetryInterval   model.Duration `yaml:"retry_interval,omitempty"`
-	RequestTimeout  model.Duration `yaml:"request_timeout,omitempty"`
-	TLSConfig       TLSConfig      `yaml:"tls_config,omitempty"`
-
-	// Catches all undefined fields and must be empty after parsing.
-	XXX map[string]interface{} `yaml:",inline"`
-}
-
 type KubernetesRole string
 
 const (
-	KubernetesRoleNode      = "node"
-	KubernetesRolePod       = "pod"
-	KubernetesRoleContainer = "container"
-	KubernetesRoleService   = "service"
-	KubernetesRoleEndpoint  = "endpoint"
-	KubernetesRoleAPIServer = "apiserver"
+	KubernetesRoleNode     = "node"
+	KubernetesRolePod      = "pod"
+	KubernetesRoleService  = "service"
+	KubernetesRoleEndpoint = "endpoints"
 )
 
 func (c *KubernetesRole) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -821,16 +825,29 @@ func (c *KubernetesRole) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		return err
 	}
 	switch *c {
-	case KubernetesRoleNode, KubernetesRolePod, KubernetesRoleContainer, KubernetesRoleService, KubernetesRoleEndpoint, KubernetesRoleAPIServer:
+	case KubernetesRoleNode, KubernetesRolePod, KubernetesRoleService, KubernetesRoleEndpoint:
 		return nil
 	default:
 		return fmt.Errorf("Unknown Kubernetes SD role %q", *c)
 	}
 }
 
+// KubernetesSDConfig is the configuration for Kubernetes service discovery.
+type KubernetesSDConfig struct {
+	APIServer       URL            `yaml:"api_server"`
+	Role            KubernetesRole `yaml:"role"`
+	BasicAuth       *BasicAuth     `yaml:"basic_auth,omitempty"`
+	BearerToken     string         `yaml:"bearer_token,omitempty"`
+	BearerTokenFile string         `yaml:"bearer_token_file,omitempty"`
+	TLSConfig       TLSConfig      `yaml:"tls_config,omitempty"`
+
+	// Catches all undefined fields and must be empty after parsing.
+	XXX map[string]interface{} `yaml:",inline"`
+}
+
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
 func (c *KubernetesSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	*c = DefaultKubernetesSDConfig
+	*c = KubernetesSDConfig{}
 	type plain KubernetesSDConfig
 	err := unmarshal((*plain)(c))
 	if err != nil {
@@ -840,16 +857,55 @@ func (c *KubernetesSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) er
 		return err
 	}
 	if c.Role == "" {
-		return fmt.Errorf("role missing (one of: container, pod, service, endpoint, node, apiserver)")
-	}
-	if len(c.APIServers) == 0 {
-		return fmt.Errorf("Kubernetes SD configuration requires at least one Kubernetes API server")
+		return fmt.Errorf("role missing (one of: pod, service, endpoints, node)")
 	}
 	if len(c.BearerToken) > 0 && len(c.BearerTokenFile) > 0 {
 		return fmt.Errorf("at most one of bearer_token & bearer_token_file must be configured")
 	}
 	if c.BasicAuth != nil && (len(c.BearerToken) > 0 || len(c.BearerTokenFile) > 0) {
 		return fmt.Errorf("at most one of basic_auth, bearer_token & bearer_token_file must be configured")
+	}
+	return nil
+}
+
+// GCESDConfig is the configuration for GCE based service discovery.
+type GCESDConfig struct {
+	// Project: The Google Cloud Project ID
+	Project string `yaml:"project"`
+
+	// Zone: The zone of the scrape targets.
+	// If you need to configure multiple zones use multiple gce_sd_configs
+	Zone string `yaml:"zone"`
+
+	// Filter: Can be used optionally to filter the instance list by other criteria.
+	// Syntax of this filter string is described here in the filter query parameter section:
+	// https://cloud.google.com/compute/docs/reference/latest/instances/list
+	Filter string `yaml:"filter,omitempty"`
+
+	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
+	Port            int            `yaml:"port"`
+	TagSeparator    string         `yaml:"tag_separator,omitempty"`
+
+	// Catches all undefined fields and must be empty after parsing.
+	XXX map[string]interface{} `yaml:",inline"`
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (c *GCESDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = DefaultGCESDConfig
+	type plain GCESDConfig
+	err := unmarshal((*plain)(c))
+	if err != nil {
+		return err
+	}
+	if err := checkOverflow(c.XXX, "gce_sd_config"); err != nil {
+		return err
+	}
+	if c.Project == "" {
+		return fmt.Errorf("GCE SD configuration requires a project")
+	}
+	if c.Zone == "" {
+		return fmt.Errorf("GCE SD configuration requires a zone")
 	}
 	return nil
 }
@@ -861,6 +917,7 @@ type EC2SDConfig struct {
 	SecretKey       string         `yaml:"secret_key,omitempty"`
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
 	Port            int            `yaml:"port"`
+
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline"`
 }
@@ -890,6 +947,7 @@ type AzureSDConfig struct {
 	ClientID        string         `yaml:"client_id,omitempty"`
 	ClientSecret    string         `yaml:"client_secret,omitempty"`
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
+
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline"`
 }
@@ -982,8 +1040,9 @@ type RelabelConfig struct {
 	Regex Regexp `yaml:"regex,omitempty"`
 	// Modulus to take of the hash of concatenated values from the source labels.
 	Modulus uint64 `yaml:"modulus,omitempty"`
-	// The label to which the resulting string is written in a replacement.
-	TargetLabel model.LabelName `yaml:"target_label,omitempty"`
+	// TargetLabel is the label to which the resulting string is written in a replacement.
+	// Regexp interpolation is allowed for the replace action.
+	TargetLabel string `yaml:"target_label,omitempty"`
 	// Replacement is the regex replacement pattern to be used.
 	Replacement string `yaml:"replacement,omitempty"`
 	// Action is the action to be performed for the relabeling.
@@ -1003,8 +1062,20 @@ func (c *RelabelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err := checkOverflow(c.XXX, "relabel_config"); err != nil {
 		return err
 	}
+	if c.Regex.Regexp == nil {
+		c.Regex = MustNewRegexp("")
+	}
 	if c.Modulus == 0 && c.Action == RelabelHashMod {
 		return fmt.Errorf("relabel configuration for hashmod requires non-zero modulus")
+	}
+	if (c.Action == RelabelReplace || c.Action == RelabelHashMod) && c.TargetLabel == "" {
+		return fmt.Errorf("relabel configuration for %s action requires 'target_label' value", c.Action)
+	}
+	if c.Action == RelabelReplace && !relabelTarget.MatchString(c.TargetLabel) {
+		return fmt.Errorf("%q is invalid 'target_label' for %s action", c.TargetLabel, c.Action)
+	}
+	if c.Action == RelabelHashMod && !model.LabelName(c.TargetLabel).IsValid() {
+		return fmt.Errorf("%q is invalid 'target_label' for %s action", c.TargetLabel, c.Action)
 	}
 	return nil
 }
@@ -1054,4 +1125,30 @@ func (re Regexp) MarshalYAML() (interface{}, error) {
 		return re.original, nil
 	}
 	return nil, nil
+}
+
+// RemoteWriteConfig is the configuration for remote storage.
+type RemoteWriteConfig struct {
+	URL                 *URL             `yaml:"url,omitempty"`
+	RemoteTimeout       model.Duration   `yaml:"remote_timeout,omitempty"`
+	BasicAuth           *BasicAuth       `yaml:"basic_auth,omitempty"`
+	TLSConfig           TLSConfig        `yaml:"tls_config,omitempty"`
+	ProxyURL            URL              `yaml:"proxy_url,omitempty"`
+	WriteRelabelConfigs []*RelabelConfig `yaml:"write_relabel_configs,omitempty"`
+
+	// Catches all undefined fields and must be empty after parsing.
+	XXX map[string]interface{} `yaml:",inline"`
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (c *RemoteWriteConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = DefaultRemoteWriteConfig
+	type plain RemoteWriteConfig
+	if err := unmarshal((*plain)(c)); err != nil {
+		return err
+	}
+	if err := checkOverflow(c.XXX, "remote_write"); err != nil {
+		return err
+	}
+	return nil
 }

@@ -15,12 +15,14 @@ package discovery
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/defaults"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"golang.org/x/net/context"
@@ -31,17 +33,39 @@ import (
 )
 
 const (
-	ec2Label           = model.MetaLabelPrefix + "ec2_"
-	ec2LabelAZ         = ec2Label + "availability_zone"
-	ec2LabelInstanceID = ec2Label + "instance_id"
-	ec2LabelPublicDNS  = ec2Label + "public_dns_name"
-	ec2LabelPublicIP   = ec2Label + "public_ip"
-	ec2LabelPrivateIP  = ec2Label + "private_ip"
-	ec2LabelSubnetID   = ec2Label + "subnet_id"
-	ec2LabelTag        = ec2Label + "tag_"
-	ec2LabelVPCID      = ec2Label + "vpc_id"
-	subnetSeparator    = ","
+	ec2Label              = model.MetaLabelPrefix + "ec2_"
+	ec2LabelAZ            = ec2Label + "availability_zone"
+	ec2LabelInstanceID    = ec2Label + "instance_id"
+	ec2LabelInstanceState = ec2Label + "instance_state"
+	ec2LabelInstanceType  = ec2Label + "instance_type"
+	ec2LabelPublicDNS     = ec2Label + "public_dns_name"
+	ec2LabelPublicIP      = ec2Label + "public_ip"
+	ec2LabelPrivateIP     = ec2Label + "private_ip"
+	ec2LabelSubnetID      = ec2Label + "subnet_id"
+	ec2LabelTag           = ec2Label + "tag_"
+	ec2LabelVPCID         = ec2Label + "vpc_id"
+	subnetSeparator       = ","
 )
+
+var (
+	ec2SDRefreshFailuresCount = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "sd_ec2_refresh_failures_total",
+			Help:      "The number of EC2-SD scrape failures.",
+		})
+	ec2SDRefreshDuration = prometheus.NewSummary(
+		prometheus.SummaryOpts{
+			Namespace: namespace,
+			Name:      "sd_ec2_refresh_duration_seconds",
+			Help:      "The duration of a EC2-SD refresh in seconds.",
+		})
+)
+
+func init() {
+	prometheus.MustRegister(ec2SDRefreshFailuresCount)
+	prometheus.MustRegister(ec2SDRefreshDuration)
+}
 
 // EC2Discovery periodically performs EC2-SD requests. It implements
 // the TargetProvider interface.
@@ -97,12 +121,20 @@ func (ed *EC2Discovery) Run(ctx context.Context, ch chan<- []*config.TargetGroup
 	}
 }
 
-func (ed *EC2Discovery) refresh() (*config.TargetGroup, error) {
+func (ed *EC2Discovery) refresh() (tg *config.TargetGroup, err error) {
+	t0 := time.Now()
+	defer func() {
+		ec2SDRefreshDuration.Observe(time.Since(t0).Seconds())
+		if err != nil {
+			ec2SDRefreshFailuresCount.Inc()
+		}
+	}()
+
 	ec2s := ec2.New(ed.aws)
-	tg := &config.TargetGroup{
+	tg = &config.TargetGroup{
 		Source: *ed.aws.Region,
 	}
-	if err := ec2s.DescribeInstancesPages(nil, func(p *ec2.DescribeInstancesOutput, lastPage bool) bool {
+	if err = ec2s.DescribeInstancesPages(nil, func(p *ec2.DescribeInstancesOutput, lastPage bool) bool {
 		for _, r := range p.Reservations {
 			for _, inst := range r.Instances {
 				if inst.PrivateIpAddress == nil {
@@ -112,7 +144,7 @@ func (ed *EC2Discovery) refresh() (*config.TargetGroup, error) {
 					ec2LabelInstanceID: model.LabelValue(*inst.InstanceId),
 				}
 				labels[ec2LabelPrivateIP] = model.LabelValue(*inst.PrivateIpAddress)
-				addr := fmt.Sprintf("%s:%d", *inst.PrivateIpAddress, ed.port)
+				addr := net.JoinHostPort(*inst.PrivateIpAddress, fmt.Sprintf("%d", ed.port))
 				labels[model.AddressLabel] = model.LabelValue(addr)
 
 				if inst.PublicIpAddress != nil {
@@ -121,6 +153,8 @@ func (ed *EC2Discovery) refresh() (*config.TargetGroup, error) {
 				}
 
 				labels[ec2LabelAZ] = model.LabelValue(*inst.Placement.AvailabilityZone)
+				labels[ec2LabelInstanceState] = model.LabelValue(*inst.State.Name)
+				labels[ec2LabelInstanceType] = model.LabelValue(*inst.InstanceType)
 
 				if inst.VpcId != nil {
 					labels[ec2LabelVPCID] = model.LabelValue(*inst.VpcId)
