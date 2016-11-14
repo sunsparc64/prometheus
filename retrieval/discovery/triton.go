@@ -14,64 +14,67 @@
 package discovery
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"time"
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
+	"net/http"
 
-	"github.com/joyent/gocommon/client"
-	"github.com/joyent/gosdc/cloudapi"
-	"github.com/joyent/gosign/auth"
 	promlog "github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/util/strutil"
 	"golang.org/x/net/context"
 )
 
 const (
 	tritonLabel            = model.MetaLabelPrefix + "triton_"
 	tritonLabelMachineId   = tritonLabel + "machine_id"
-	tritonLabelMachineName = tritonLabel + "machine_name"
-	tritonLabelPublicIP    = tritonLabel + "public_ip"
-	tritonLabelTag         = tritonLabel + "tag_"
 )
+
+type TritonDiscoveryResponse struct {
+	Containers []string `json:"containers"`
+}
 
 // TritonDiscovery periodically performs Triton-SD requests. It implements
 // the TargetProvider interface.
 type TritonDiscovery struct {
 	sdConfig  *config.TritonSDConfig
-	api *cloudapi.Client
+	client *http.Client
 	interval  time.Duration
 }
 
 // NewTritonDiscovery returns a new TritonDiscovery which periodically refreshes its targets.
 func NewTritonDiscovery(conf *config.TritonSDConfig) *TritonDiscovery {
-	// TODO: What to do with 'err' here?
-	tritonAuth, err := auth.NewAuth(conf.Account, conf.Key, conf.KeyAlgorithm)
-	if (err != nil) {
-		promlog.Errorf("Invalid settings for account %s - %s", conf.Account, err)
-		return nil
+	cert, err := tls.LoadX509KeyPair(conf.Cert, conf.Key)
+	if err != nil {
+		log.Fatalln("Unable to load cert", err)
 	}
 
-    tritonCreds := &auth.Credentials{
-        UserAuthentication: tritonAuth,
-        SdcKeyId:           conf.KeyId,
-        SdcEndpoint:        auth.Endpoint{URL: conf.Url},
-    }
+	clientCACert, err := ioutil.ReadFile(conf.Cert)
+	if err != nil {
+		log.Fatal("Unable to open cert", err)
+	}
 
-    api := cloudapi.New(client.NewClient(
-        conf.Url,
-        cloudapi.DefaultAPIVersion,
-        tritonCreds,
-		// XXX: Something better?
-		log.New(os.Stderr, "", log.LstdFlags),
-    ))
+	clientCertPool := x509.NewCertPool()
+	clientCertPool.AppendCertsFromPEM(clientCACert)
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      clientCertPool,
+		InsecureSkipVerify: true,
+	}
+
+	tlsConfig.BuildNameToCertificate()
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	client := &http.Client{Transport: transport}
 
 	return &TritonDiscovery{
 		sdConfig: conf,
-		api: api,
+		client: client,
 		interval: time.Duration(conf.RefreshInterval),
 	}
 }
@@ -107,48 +110,40 @@ func (td *TritonDiscovery) Run(ctx context.Context, ch chan<- []*config.TargetGr
 }
 
 func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
-	u, err := url.Parse(td.sdConfig.Url)
+	var endpoint = fmt.Sprintf("%s%s:%d/discover", "https://", td.sdConfig.Endpoint, td.sdConfig.Port)
+	u, err := url.Parse(endpoint)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(u.Host);
+	// TODO: Remove this line
+	fmt.Println(u.Host)
 
 	tg := &config.TargetGroup{
-		Source: td.sdConfig.Url,
+		Source: endpoint,
 	}
 
-	// TODO: Filter to only running containers?
-	filter := cloudapi.NewFilter()
-	filter.Add("state", "running")
-
-	machines, err := td.api.ListMachines(filter)
-	if (err != nil) {
-		return nil, fmt.Errorf("could not list machines: %s", err)
+	resp, err := td.client.Get(endpoint)
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer resp.Body.Close()
 
-	for _, machine := range machines {
-		// TODO: Should we keep non running containers?
-		if machine.State != "running" {
-			continue
-		}
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tdr := TritonDiscoveryResponse{}
+	json.Unmarshal([]byte(string(data)), &tdr)
+	log.Println(tdr)
 
+	for _, container := range tdr.Containers {
+		log.Println(container)
 		labels := model.LabelSet{
-			tritonLabelMachineId:   model.LabelValue(machine.Id),
-			tritonLabelMachineName: model.LabelValue(machine.Name),
-			tritonLabelPublicIP:    model.LabelValue(machine.PrimaryIP),
+			tritonLabelMachineId:   model.LabelValue(container),
 		}
-
-		// TODO: Get the correct URL for this.
-		addr := fmt.Sprintf("%s.cm.coal.cns.joyent.us:9163", machine.Id)
+		addr := fmt.Sprintf("%s.%s:%d", container, td.sdConfig.Endpoint, td.sdConfig.Port)
 		labels[model.AddressLabel] = model.LabelValue(addr)
-
-		// TODO: CNS name for container?
-
-		for k, v := range machine.Tags {
-			name := strutil.SanitizeLabelName(k)
-			labels[tritonLabelTag+model.LabelName(name)] = model.LabelValue(fmt.Sprintf("%s", v))
-		}
 		tg.Targets = append(tg.Targets, labels)
 	}
 

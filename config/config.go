@@ -152,7 +152,7 @@ var (
 
 	// DefaultTritonSDConfig is the default Triton SD configuration.
 	DefaultTritonSDConfig = TritonSDConfig{
-		KeyAlgorithm: "rsa-sha256",
+		Port:            9163,
 		RefreshInterval: model.Duration(60 * time.Second),
 	}
 
@@ -966,11 +966,12 @@ func (c *AzureSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // TritonSDConfig is the configuration for Triton based service discovery.
 type TritonSDConfig struct {
-	Url             string         `yaml:"url"`
 	Account         string         `yaml:"account"`
+	Cert            string         `yaml:"cert"`
+	DnsSuffix       string         `yaml:"dns_suffix"`
+	Endpoint        string         `yaml:"endpoint"`
 	Key             string         `yaml:"key"`
-	KeyId           string         `yaml:"key_id"`
-	KeyAlgorithm    string         `yaml:"key_algorithm,omitempty"`
+	Port            int            `yaml:"port"`
 	RefreshInterval model.Duration `yaml:"refresh_interval,omitempty"`
 	// Catches all undefined fields and must be empty after parsing.
 	XXX map[string]interface{} `yaml:",inline"`
@@ -984,17 +985,20 @@ func (c *TritonSDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 	if err != nil {
 		return err
 	}
-	if c.Url == "" {
-		return fmt.Errorf("Triton SD configuration requires a datacenter Url")
-	}
 	if c.Account == "" {
 		return fmt.Errorf("Triton SD configuration requires an account")
 	}
-	if c.Key == "" {
-		return fmt.Errorf("Triton SD configuration requires a key")
+	if c.Cert == "" {
+		return fmt.Errorf("Triton SD configuration requires a cert")
 	}
-	if c.KeyId == "" {
-		return fmt.Errorf("Triton SD configuration requires a key_id")
+	if c.DnsSuffix == "" {
+		return fmt.Errorf("Triton SD configuration requires a dns_suffix")
+	}
+	if c.Endpoint == "" {
+		return fmt.Errorf("Triton SD configuration requires an endpoint")
+	}
+	if c.Key== "" {
+		return fmt.Errorf("Triton SD configuration requires a key")
 	}
 	return checkOverflow(c.XXX, "triton_sd_config")
 }
