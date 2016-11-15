@@ -424,6 +424,9 @@ func providersFromConfig(cfg *config.ScrapeConfig) map[string]TargetProvider {
 	for i, c := range cfg.AzureSDConfigs {
 		app("azure", i, discovery.NewAzureDiscovery(c))
 	}
+	for i, c := range cfg.TritonSDConfigs {
+		app("triton", i, discovery.NewTritonDiscovery(c))
+	}
 	if len(cfg.StaticConfigs) > 0 {
 		app("static", 0, NewStaticProvider(cfg.StaticConfigs))
 	}
