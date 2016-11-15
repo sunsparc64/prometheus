@@ -14,15 +14,14 @@
 package discovery
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/url"
-	"time"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"time"
 
 	promlog "github.com/prometheus/common/log"
 	"github.com/prometheus/common/model"
@@ -31,8 +30,8 @@ import (
 )
 
 const (
-	tritonLabel            = model.MetaLabelPrefix + "triton_"
-	tritonLabelMachineId   = tritonLabel + "machine_id"
+	tritonLabel          = model.MetaLabelPrefix + "triton_"
+	tritonLabelMachineId = tritonLabel + "machine_id"
 )
 
 type TritonDiscoveryResponse struct {
@@ -42,9 +41,9 @@ type TritonDiscoveryResponse struct {
 // TritonDiscovery periodically performs Triton-SD requests. It implements
 // the TargetProvider interface.
 type TritonDiscovery struct {
-	sdConfig  *config.TritonSDConfig
-	client *http.Client
-	interval  time.Duration
+	sdConfig *config.TritonSDConfig
+	client   *http.Client
+	interval time.Duration
 }
 
 // NewTritonDiscovery returns a new TritonDiscovery which periodically refreshes its targets.
@@ -63,9 +62,9 @@ func NewTritonDiscovery(conf *config.TritonSDConfig) *TritonDiscovery {
 	clientCertPool.AppendCertsFromPEM(clientCACert)
 
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      clientCertPool,
-		InsecureSkipVerify: true,
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            clientCertPool,
+		InsecureSkipVerify: conf.InsecureSkipVerify,
 	}
 
 	tlsConfig.BuildNameToCertificate()
@@ -74,7 +73,7 @@ func NewTritonDiscovery(conf *config.TritonSDConfig) *TritonDiscovery {
 
 	return &TritonDiscovery{
 		sdConfig: conf,
-		client: client,
+		client:   client,
 		interval: time.Duration(conf.RefreshInterval),
 	}
 }
@@ -111,36 +110,26 @@ func (td *TritonDiscovery) Run(ctx context.Context, ch chan<- []*config.TargetGr
 
 func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 	var endpoint = fmt.Sprintf("%s%s:%d/discover", "https://", td.sdConfig.Endpoint, td.sdConfig.Port)
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		panic(err)
-	}
-
-	// TODO: Remove this line
-	fmt.Println(u.Host)
-
 	tg := &config.TargetGroup{
 		Source: endpoint,
 	}
 
 	resp, err := td.client.Get(endpoint)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error reaching endpoint: %s", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error reading response body: %s", err)
 	}
 	tdr := TritonDiscoveryResponse{}
 	json.Unmarshal([]byte(string(data)), &tdr)
-	log.Println(tdr)
 
 	for _, container := range tdr.Containers {
-		log.Println(container)
 		labels := model.LabelSet{
-			tritonLabelMachineId:   model.LabelValue(container),
+			tritonLabelMachineId: model.LabelValue(container),
 		}
 		addr := fmt.Sprintf("%s.%s:%d", container, td.sdConfig.Endpoint, td.sdConfig.Port)
 		labels[model.AddressLabel] = model.LabelValue(addr)
