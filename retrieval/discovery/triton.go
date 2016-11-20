@@ -116,13 +116,13 @@ func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 
 	resp, err := td.client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error reaching endpoint: %s", err)
+		return tg, fmt.Errorf("Error reaching endpoint: %s", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Error reading response body: %s", err)
+		return tg, fmt.Errorf("Error reading response body: %s", err);
 	}
 	tdr := TritonDiscoveryResponse{}
 	json.Unmarshal([]byte(string(data)), &tdr)
