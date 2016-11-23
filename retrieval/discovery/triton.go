@@ -30,12 +30,20 @@ import (
 )
 
 const (
-	tritonLabel          = model.MetaLabelPrefix + "triton_"
-	tritonLabelMachineId = tritonLabel + "machine_id"
+	tritonLabel             = model.MetaLabelPrefix + "triton_"
+	tritonLabelMachineId    = tritonLabel + "machine_id"
+	tritonLabelMachineAlias = tritonLabel + "machine_alias"
+	tritonLabelMachineImage = tritonLabel + "machine_image"
+	tritonLabelServerId     = tritonLabel + "server_id"
 )
 
 type TritonDiscoveryResponse struct {
-	Containers []string `json:"containers"`
+	Containers []struct {
+		ServerUUID  string `json:"server_uuid"`
+		VMAlias     string `json:"vm_alias"`
+		VMImageUUID string `json:"vm_image_uuid"`
+		VMUUID      string `json:"vm_uuid"`
+	} `json:"containers"`
 }
 
 // TritonDiscovery periodically performs Triton-SD requests. It implements
@@ -122,16 +130,18 @@ func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return tg, fmt.Errorf("Error reading response body: %s", err);
+		return tg, fmt.Errorf("Error reading response body: %s", err)
 	}
 	tdr := TritonDiscoveryResponse{}
 	json.Unmarshal([]byte(string(data)), &tdr)
-
 	for _, container := range tdr.Containers {
 		labels := model.LabelSet{
-			tritonLabelMachineId: model.LabelValue(container),
+			tritonLabelMachineId:    model.LabelValue(container.VMUUID),
+			tritonLabelMachineAlias: model.LabelValue(container.VMAlias),
+			tritonLabelMachineImage: model.LabelValue(container.VMImageUUID),
+			tritonLabelServerId:     model.LabelValue(container.ServerUUID),
 		}
-		addr := fmt.Sprintf("%s.%s:%d", container, td.sdConfig.DnsSuffix, td.sdConfig.Port)
+		addr := fmt.Sprintf("%s.%s:%d", container.VMUUID, td.sdConfig.DnsSuffix, td.sdConfig.Port)
 		labels[model.AddressLabel] = model.LabelValue(addr)
 		tg.Targets = append(tg.Targets, labels)
 	}
