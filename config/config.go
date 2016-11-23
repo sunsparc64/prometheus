@@ -973,7 +973,7 @@ type TritonSDConfig struct {
 	DnsSuffix          string         `yaml:"dns_suffix"`
 	Endpoint           string         `yaml:"endpoint"`
 	InsecureSkipVerify bool           `yaml:"insecure_skip_verify"`
-	Version            int            `yaml:"verion"`
+	Version            int            `yaml:"version"`
 	Key                string         `yaml:"key"`
 	Port               int            `yaml:"port"`
 	RefreshInterval    model.Duration `yaml:"refresh_interval,omitempty"`
