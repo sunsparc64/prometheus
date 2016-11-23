@@ -155,6 +155,7 @@ var (
 		Port:               9163,
 		RefreshInterval:    model.Duration(60 * time.Second),
 		InsecureSkipVerify: false,
+		Version:            1,
 	}
 
 	// DefaultRemoteWriteConfig is the default remote write configuration.
@@ -972,6 +973,7 @@ type TritonSDConfig struct {
 	DnsSuffix          string         `yaml:"dns_suffix"`
 	Endpoint           string         `yaml:"endpoint"`
 	InsecureSkipVerify bool           `yaml:"insecure_skip_verify"`
+	Version            int            `yaml:"verion"`
 	Key                string         `yaml:"key"`
 	Port               int            `yaml:"port"`
 	RefreshInterval    model.Duration `yaml:"refresh_interval,omitempty"`

@@ -117,7 +117,7 @@ func (td *TritonDiscovery) Run(ctx context.Context, ch chan<- []*config.TargetGr
 }
 
 func (td *TritonDiscovery) refresh() (*config.TargetGroup, error) {
-	var endpoint = fmt.Sprintf("%s%s:%d/discover", "https://", td.sdConfig.Endpoint, td.sdConfig.Port)
+	var endpoint = fmt.Sprintf("https://%s:%d/v%d/discover", td.sdConfig.Endpoint, td.sdConfig.Port, td.sdConfig.Version)
 	tg := &config.TargetGroup{
 		Source: endpoint,
 	}
