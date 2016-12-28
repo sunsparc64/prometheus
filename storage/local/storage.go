@@ -87,6 +87,11 @@ var (
 		"The maximum number of chunks that can be waiting for persistence before sample ingestion will stop.",
 		nil, nil,
 	)
+	maxMemChunksDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, subsystem, "max_memory_chunks"),
+		"The configured maximum number of chunks that can be held in memory",
+		nil, nil,
+	)
 )
 
 type quarantineRequest struct {
@@ -938,6 +943,9 @@ func (s *MemorySeriesStorage) getOrCreateSeries(fp model.Fingerprint, m model.Me
 			// while (which is confusing as it makes the series
 			// appear as archived or purged).
 			cds, err = s.loadChunkDescs(fp, 0)
+			if err == nil && len(cds) == 0 {
+				err = fmt.Errorf("unarchived fingerprint %v (metric %v) has no chunks on disk", fp, m)
+			}
 			if err != nil {
 				s.quarantineSeries(fp, m, err)
 				return nil, err
@@ -1760,6 +1768,11 @@ func (s *MemorySeriesStorage) Collect(ch chan<- prometheus.Metric) {
 	ch <- s.ingestedSamplesCount
 	s.discardedSamplesCount.Collect(ch)
 	ch <- s.nonExistentSeriesMatchesCount
+	ch <- prometheus.MustNewConstMetric(
+		maxMemChunksDesc,
+		prometheus.GaugeValue,
+		float64(s.maxMemoryChunks),
+	)
 	ch <- prometheus.MustNewConstMetric(
 		chunk.NumMemChunksDesc,
 		prometheus.GaugeValue,

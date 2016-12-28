@@ -26,13 +26,6 @@ import (
 )
 
 const (
-	// chunkDescEvictionFactor is a factor used for chunk.Desc eviction (as opposed
-	// to evictions of chunks, see method evictOlderThan. A chunk takes about 20x
-	// more memory than a chunk.Desc. With a chunkDescEvictionFactor of 10, not more
-	// than a third of the total memory taken by a series will be used for
-	// chunkDescs.
-	chunkDescEvictionFactor = 10
-
 	headChunkTimeout = time.Hour // Close head chunk if not touched for that long.
 )
 
@@ -283,11 +276,11 @@ func (s *memorySeries) maybeCloseHeadChunk() bool {
 	return false
 }
 
-// evictChunkDescs evicts chunkDescs if there are chunkDescEvictionFactor times
-// more than non-evicted chunks. iOldestNotEvicted is the index within the
-// current chunkDescs of the oldest chunk that is not evicted.
+// evictChunkDescs evicts chunkDescs if the chunk is evicted.
+// iOldestNotEvicted is the index within the current chunkDescs of the oldest
+// chunk that is not evicted.
 func (s *memorySeries) evictChunkDescs(iOldestNotEvicted int) {
-	lenToKeep := chunkDescEvictionFactor * (len(s.chunkDescs) - iOldestNotEvicted)
+	lenToKeep := len(s.chunkDescs) - iOldestNotEvicted
 	if lenToKeep < len(s.chunkDescs) {
 		s.savedFirstTime = s.firstTime()
 		lenEvicted := len(s.chunkDescs) - lenToKeep
@@ -462,10 +455,18 @@ func (s *memorySeries) preloadChunksForRange(
 		if err != nil {
 			return nopIter, err
 		}
+		if s.chunkDescsOffset != -1 && len(cds) != s.chunkDescsOffset {
+			return nopIter, fmt.Errorf(
+				"unexpected number of chunk descs loaded for fingerprint %v: expected %d, got %d",
+				fp, s.chunkDescsOffset, len(cds),
+			)
+		}
 		s.chunkDescs = append(cds, s.chunkDescs...)
 		s.chunkDescsOffset = 0
 		s.persistWatermark += len(cds)
-		firstChunkDescTime = s.chunkDescs[0].FirstTime()
+		if len(s.chunkDescs) > 0 {
+			firstChunkDescTime = s.chunkDescs[0].FirstTime()
+		}
 	}
 
 	if len(s.chunkDescs) == 0 || through.Before(firstChunkDescTime) {

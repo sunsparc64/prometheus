@@ -95,6 +95,10 @@ scrape_configs:
     action:        keep
   - action:        labelmap
     regex:         1
+  - action:        labeldrop
+    regex:         d
+  - action:        labelkeep
+    regex:         k
 
   metric_relabel_configs:
   - source_labels: [__name__]
@@ -146,6 +150,7 @@ scrape_configs:
     - region: us-east-1
       access_key: access
       secret_key: secret
+      profile: profile
 
 - job_name: service-azure
   azure_sd_configs:
@@ -173,3 +178,12 @@ scrape_configs:
   static_configs:
     - targets:
       - localhost:9090
+
+alerting:
+  alertmanagers:
+  - scheme: https
+    static_configs:
+    - targets:
+      - "1.2.3.4:9093"
+      - "1.2.3.5:9093"
+      - "1.2.3.6:9093"
